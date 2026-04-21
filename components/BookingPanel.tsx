@@ -48,43 +48,58 @@ export default function BookingPanel({
   
    
   const handleConfirm = async () => {
-    setLoading(true);
-    try {
-      // Use real Firebase Auth UID if logged in, else guest-user
-      //const userId = user?.uid ?? "guest-user";
-      //const userName = user?.displayName ?? user?.email ?? "Guest";
-      if (!user) {
-  toast.error("Please login to book a slot");
-  return;
-}
-    const userId = user.uid;
-    const userName = user!.displayName || user!.email || "User";
-    
-      await createBooking({
-        userId,
-        userName,
-        parkingId:   site.id,
-        parkingName: site.name,
-        latitude:    site.latitude,
-        longitude:   site.longitude,
-        slotId:      chosenSlot,
-        type:        mode === "now" ? "now" : "prebook",
-        startTime:   mode === "now" ? new Date().toISOString() : `${date}T${timeFrom}`,
-        date,
-        time:        timeFrom,
-        duration,
-        cost,
-        status:      "active",
-        vehiclePlate: user ? "" : "",
-      });
-      setStep("success");
-      toast.success("Booking confirmed! 🎉");
-    } catch {
-      toast.error("Booking failed — check Firebase rules.");
-    } finally {
-      setLoading(false);
+  setLoading(true);
+
+  try {
+    if (!user) {
+      toast.error("Please login to book a slot");
+      return;
     }
-  };
+
+    const userId = user.uid;
+
+    // 🔥 planned start time
+    const plannedStart =
+      mode === "now"
+        ? new Date().toISOString()
+        : `${date}T${timeFrom}`;
+
+    // 🔥 planned end (for reference only)
+    const plannedEnd = new Date(
+      new Date(plannedStart).getTime() + duration * 60 * 60 * 1000
+    ).toISOString();
+
+    await createBooking(
+      {
+        parkingId: site.id,
+        parkingName: site.name,
+        slotId: chosenSlot,
+
+        type: mode === "now" ? "now" : "prebook",
+
+        // 🟢 planned
+        startTime: plannedStart,
+        endTime: plannedEnd,
+
+        // 🔴 real values (set later by ESP)
+        entryTime: null,
+        exitTime: null,
+
+        status: "active",
+        vehiclePlate: "",
+      },
+      userId
+    );
+
+    setStep("success");
+    toast.success("Booking confirmed! 🎉");
+
+  } catch {
+    toast.error("Booking failed — check Firebase rules.");
+  } finally {
+    setLoading(false);
+  }
+};
 
   return (
     <div className="absolute inset-0 z-[2000]">

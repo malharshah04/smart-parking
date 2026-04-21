@@ -47,36 +47,65 @@ export default function BookingModal({
     if (!chosenSlot) return toast.error("Please select a slot");
     setStep("confirm");
   };
+const handleConfirm = async () => {
+  if (!chosenSlot) return;
 
-  const handleConfirm = async () => {
-    if (!chosenSlot) return;
-      const user = auth.currentUser;   // 👈 get user
-    if (!user) {                     // 👈 check
+  const user = auth.currentUser;
+  if (!user) {
     toast.error("Please login first");
     return;
   }
-    setLoading(true);
-    try {
-      await createBooking({
-        userId: user.uid, // Replace with real auth uid
+
+  setLoading(true);
+
+  try {
+    const plannedStart =
+      type === "now"
+        ? new Date().toISOString()
+        : `${watch("date")}T${watch("time")}`;
+
+    const plannedEnd = new Date(
+      new Date(plannedStart).getTime() +
+      (Number(duration) || 1) * 60 * 60 * 1000
+    ).toISOString();
+
+    // 🚨 Restrict ESP slot
+    if (site.id === "p022" && chosenSlot !== "A1") {
+      toast.error("Only Slot A1 is real-time tracked");
+      return;
+    }
+
+    await createBooking(
+      {
         parkingId: site.id,
         parkingName: site.name,
         slotId: chosenSlot,
-        type,
-        startTime: new Date().toISOString(),
-        duration: Number(duration) || 1,
-        cost,
+
+        type: type === "now" ? "now" : "prebook",
+
+        // 🟢 planned
+        startTime: plannedStart,
+        endTime: plannedEnd,
+
+        // 🔴 actual (filled by ESP later)
+        entryTime: undefined,
+        exitTime: undefined,
+
         status: "active",
         vehiclePlate: "",
-      });
-      setStep("success");
-      toast.success("Booking confirmed!");
-    } catch (err) {
-      toast.error("Booking failed. Check Firebase permissions.");
-    } finally {
-      setLoading(false);
-    }
-  };
+      },
+      user.uid
+    );
+
+    setStep("success");
+    toast.success("Booking confirmed!");
+
+  } catch (err) {
+    toast.error("Booking failed. Check Firebase permissions.");
+  } finally {
+    setLoading(false);
+  }
+};
 
   return (
     <div className="absolute inset-0 z-[2000] flex items-end justify-center">

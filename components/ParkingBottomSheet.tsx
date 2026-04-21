@@ -1,4 +1,5 @@
-"use client";
+
+import { useAutoCheckout } from "@/hooks/useFirestore";
 
 import { useState, useMemo } from "react";
 import {
@@ -136,6 +137,8 @@ function SlotGridDisplay({
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function ParkingBottomSheet({ site, precomputedAvailable, onClose }: Props) {
+    useAutoCheckout(); 
+
   const [tab, setTab]                   = useState<Tab>("info");
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
   const [bookingMode, setBookingMode]   = useState<"now" | "later" | null>(null);
