@@ -1,6 +1,6 @@
 import { initializeApp, getApps } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
-//import { getDatabase } from "firebase/database";
+import { getDatabase } from "firebase/database";
 import { getAuth } from "firebase/auth";
 
 const firebaseConfig = {
@@ -17,6 +17,6 @@ const firebaseConfig = {
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 
 export const db   = getFirestore(app);   // Firestore  → bookings, parking sites
-//export const rtdb = getDatabase(app);    // Realtime DB → ESP32 live slot data
+export const rtdb = getDatabase(app);    // Realtime DB → ESP32 live slot data
 export const auth = getAuth(app);
 export default app;

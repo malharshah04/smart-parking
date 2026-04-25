@@ -6,22 +6,19 @@ import {
   addDoc, updateDoc, doc, serverTimestamp,
 } from "firebase/firestore";
 import { ref, onValue } from "firebase/database";
-//import { db, rtdb } from "@/lib/firebase";
+import { db, rtdb } from "@/lib/firebase";
 
-import { db} from "@/lib/firebase";
 import type { ParkingSite, ParkingSlot, Booking } from "@/types";
 
-// ─── Real ESP32 lot config ────────────────────────────────────────────────────
-const REAL_LOT_ID = "lot1";
-const ESP32_SLOT_MAP: Record<string, string> = {
-  slot1: "A1",
-};
+// 🔥 FINAL LOCK
+const REAL_LOT_ID = "p022";
+const REAL_SLOT_ID = "A1";
 
 // ─── Parking Sites ────────────────────────────────────────────────────────────
 export function useParkingSites() {
-  const [sites, setSites]     = useState<ParkingSite[]>([]);
+  const [sites, setSites] = useState<ParkingSite[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const unsub = onSnapshot(
@@ -38,60 +35,53 @@ export function useParkingSites() {
   return { sites, loading, error };
 }
 
-// ─── ESP32 live slots (RTDB) — only for lot1 ─────────────────────────────────
-/*export function useRealSlots(parkingId: string | null) {
-  const [slots, setSlots]     = useState<ParkingSlot[] | null>(null);
+// ─── 🔴 ONLY REAL SLOT (A1) FROM ESP ──────────────────────────────────────────
+export function useRealSlots(parkingId: string | null) {
+  const [slots, setSlots] = useState<ParkingSlot[] | null>(null);
   const [loading, setLoading] = useState(true);
+
   const isRealLot = parkingId === REAL_LOT_ID;
 
   useEffect(() => {
-    if (!isRealLot) { setSlots(null); setLoading(false); return; }
+    if (!isRealLot) {
+      setSlots(null);
+      setLoading(false);
+      return;
+    }
 
-    const unsub = onValue(
-      ref(rtdb, "parking"),
-      (snapshot) => {
-        const data = snapshot.val();
-        if (!data) { setSlots([]); setLoading(false); return; }
-        setSlots(
-          Object.entries(data).map(([key, val]) => {
-            const v = val as { status: string; distance: number };
-            const displayId = ESP32_SLOT_MAP[key] ?? key;
-            return {
-              id: displayId, slotId: displayId,
-              parkingId: REAL_LOT_ID,
-              occupied: v.status === "OCCUPIED",
-              reserved: false,
-              distance: v.distance,
-              isLive: true,
-            };
-          })
-        );
+    const slotRef = ref(rtdb, `parking/${REAL_LOT_ID}/${REAL_SLOT_ID}`);
+
+    const unsub = onValue(slotRef, (snap) => {
+      const v = snap.val();
+
+      if (!v) {
+        setSlots([]);
         setLoading(false);
-      },
-      (err) => { console.error("RTDB:", err); setLoading(false); }
-    );
+        return;
+      }
+
+      setSlots([
+        {
+          id: REAL_SLOT_ID,
+          slotId: REAL_SLOT_ID,
+          parkingId: REAL_LOT_ID,
+          occupied: v.status === "OCCUPIED",
+          reserved: false,
+          distance: v.distance,
+          isLive: true,
+        },
+      ]);
+
+      setLoading(false);
+    });
+
     return () => unsub();
   }, [isRealLot]);
 
   return { slots, loading, isRealLot };
-}*/
-export function useRealSlots(parkingId: string | null) {
-  const [slots, setSlots] = useState<ParkingSlot[] | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  // 🚫 ESP disabled for now
-  useEffect(() => {
-    setSlots(null);
-    setLoading(false);
-  }, [parkingId]);
-
-  return { slots, loading, isRealLot: false };
 }
-// ─── Active bookings for a parking lot (ALL users) ───────────────────────────
-// This is the key hook that makes reserved slots persist across users.
-// Listens in real-time to Firestore bookings for this parkingId with
-// status "active". Any booked slot shows as reserved (grey) for everyone.
 
+// ─── BOOKINGS (unchanged) ─────────────────────────────────────────────────────
 export function useLotBookings(parkingId: string | null) {
   const [bookedSlotIds, setBookedSlotIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -99,7 +89,6 @@ export function useLotBookings(parkingId: string | null) {
   useEffect(() => {
     if (!parkingId) { setLoading(false); return; }
 
-    // Listen to ALL active bookings for this lot — not just current user
     const q = query(
       collection(db, "bookings"),
       where("parkingId", "==", parkingId),
@@ -107,7 +96,6 @@ export function useLotBookings(parkingId: string | null) {
     );
 
     const unsub = onSnapshot(q, (snap) => {
-      // Build a set of slotIds that are currently booked
       const booked = new Set<string>(
         snap.docs.map((d) => d.data().slotId as string)
       );
@@ -121,51 +109,7 @@ export function useLotBookings(parkingId: string | null) {
   return { bookedSlotIds, loading };
 }
 
-// ─── User's own bookings (for history page) ───────────────────────────────────
-// NOTE: No orderBy in the Firestore query — combining where() + orderBy()
-// on different fields requires a composite index which may not exist.
-// We sort client-side instead which works with no index setup needed.
-export function useBookings(userId: string) {
-  const [bookings, setBookings] = useState<Booking[]>([]);
-  const [loading, setLoading]   = useState(true);
-  const [error, setError]       = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!userId) { setLoading(false); return; }
-
-    // Simple single-field query — no composite index needed
-    const q = query(
-      collection(db, "bookings"),
-      where("userId", "==", userId)
-    );
-
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        const data = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Booking));
-        // Sort newest first in JS — no Firestore index required
-        data.sort((a, b) => {
-          const ta = (a.createdAt as { seconds?: number })?.seconds ?? 0;
-          const tb = (b.createdAt as { seconds?: number })?.seconds ?? 0;
-          return tb - ta;
-        });
-        setBookings(data);
-        setLoading(false);
-        setError(null);
-      },
-      (err) => {
-        console.error("useBookings error:", err);
-        setError(err.message);
-        setLoading(false);
-      }
-    );
-    return () => unsub();
-  }, [userId]);
-
-  return { bookings, loading, error };
-}
-
-// ─── Create Booking ───────────────────────────────────────────────────────────
+// ─── OTHER FUNCTIONS (unchanged) ──────────────────────────────────────────────
 export async function createBooking(booking: Omit<Booking, "id" | "createdAt">) {
   const docRef = await addDoc(collection(db, "bookings"), {
     ...booking,
@@ -174,14 +118,10 @@ export async function createBooking(booking: Omit<Booking, "id" | "createdAt">) 
   return docRef.id;
 }
 
-// ─── Cancel Booking ───────────────────────────────────────────────────────────
 export async function cancelBooking(bookingId: string) {
   await updateDoc(doc(db, "bookings", bookingId), { status: "cancelled" });
 }
 
-// ─── Booked slot count for a lot (for map marker display) ─────────────────────
-// Returns the count of currently active bookings so the map marker
-// subtracts booked slots from its displayed available count.
 export function useLotBookedCount(parkingId: string) {
   const [count, setCount] = useState(0);
 
@@ -197,4 +137,77 @@ export function useLotBookedCount(parkingId: string) {
   }, [parkingId]);
 
   return count;
+}
+
+// ─── USER BOOKINGS (for history page) ────────────────────────────────────────
+export function useBookings(userId: string | null) {
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [loading, setLoading]   = useState(true);
+  const [error, setError]       = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!userId) { setLoading(false); return; }
+
+    const q = query(
+      collection(db, "bookings"),
+      where("userId", "==", userId)
+    );
+
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const data = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Booking));
+        // Sort newest first
+        data.sort((a, b) => {
+          const ta = (a.createdAt as any)?.seconds ?? 0;
+          const tb = (b.createdAt as any)?.seconds ?? 0;
+          return tb - ta;
+        });
+        setBookings(data);
+        setLoading(false);
+      },
+      (err) => { setError(err.message); setLoading(false); }
+    );
+
+    return () => unsub();
+  }, [userId]);
+
+  return { bookings, loading, error };
+}
+
+// ─── AUTO CHECKOUT ────────────────────────────────────────────────────────────
+// Watches active bookings for a user and auto-cancels if the slot becomes FREE
+// (i.e. car has left). Call this once the user has an active booking.
+export function useAutoCheckout(userId: string | null) {
+  useEffect(() => {
+    if (!userId) return;
+
+    const q = query(
+      collection(db, "bookings"),
+      where("userId",   "==", userId),
+      where("status",   "==", "active")
+    );
+
+    const unsub = onSnapshot(q, (snap) => {
+      snap.docs.forEach(async (bookingDoc) => {
+        const booking = bookingDoc.data();
+
+        // Only auto-checkout real ESP32 slot
+        if (booking.parkingId !== REAL_LOT_ID || booking.slotId !== REAL_SLOT_ID) return;
+
+        const slotRef = ref(rtdb, `parking/${REAL_LOT_ID}/${REAL_SLOT_ID}`);
+        onValue(slotRef, async (snap) => {
+          const v = snap.val();
+          if (v && v.status === "FREE") {
+            await updateDoc(doc(db, "bookings", bookingDoc.id), {
+              status: "completed",
+              checkoutAt: serverTimestamp(),
+            });
+          }
+        }, { onlyOnce: true });
+      });
+    });
+
+    return () => unsub();
+  }, [userId]);
 }
